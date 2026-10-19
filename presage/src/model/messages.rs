@@ -1,4 +1,9 @@
-use libsignal_service::{prelude::Content, protocol::ServiceId};
+use libsignal_service::{
+    cipher::DecryptionFailure,
+    prelude::Content,
+    proto,
+    protocol::{DeviceId, ServiceId},
+};
 
 #[derive(Debug)]
 pub enum Received {
@@ -10,10 +15,35 @@ pub enum Received {
     /// Contacts can be later queried in the store.
     Contacts,
 
-    // Failed to receive a message from the specified service ID.
-    // A session reset with the contact may fix this.
-    DecryptionError(ServiceId),
+    /// A message from a known sender failed to decrypt. Send
+    /// [`DecryptionFailure::retry_request`] with
+    /// [`Manager::send_retry_request`](crate::Manager::send_retry_request)
+    /// so the sender resends it.
+    DecryptionError(Box<DecryptionFailure>),
+
+    /// A device of `sender` couldn't decrypt our message sent at `timestamp` and asks for it
+    /// again; resend it with [`Manager::resend_content`](crate::Manager::resend_content).
+    ///
+    /// `session_archived` is set if our session with that device was the cause: it was archived,
+    /// so the next message starts a new one. Without a message to resend, send a null message
+    /// ([`Manager::send_null_message`](crate::Manager::send_null_message)) to start it.
+    RetryRequest {
+        sender: ServiceId,
+        sender_device: DeviceId,
+        timestamp: u64,
+        session_archived: bool,
+    },
 
     /// Incoming decrypted message with metadata and content
     Content(Box<Content>),
+}
+
+/// A message as it went out, to resend when a recipient asks
+/// ([`Received::RetryRequest`]).
+#[derive(Debug, Clone)]
+pub struct SentContent {
+    /// Who got it, apart from this account's other devices: the recipient,
+    /// or the group members it reached.
+    pub recipients: Vec<ServiceId>,
+    pub content: proto::Content,
 }
